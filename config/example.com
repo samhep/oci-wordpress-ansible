@@ -14,6 +14,10 @@ server {
         fastcgi_pass unix:/var/run/php/php7.4-fpm.sock;
      }
 
+    location ~ ^/wp-json/ {
+      rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
+    }
+    
     location ~ /\.ht {
         deny all;
     }
