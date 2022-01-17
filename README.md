@@ -2,6 +2,13 @@
 
 Ansible project for Wordpress on Ubuntu 20.04 on Oracle Cloud Infrastructure
 
+# Pre-reqs
+
+Install these ansible galaxy modules:
+
+ - community.mysql - https://galaxy.ansible.com/community/mysql
+ - community.general - https://galaxy.ansible.com/community/general
+
 # Steps to configure
 
  1. Configure nginx config file: example.com (replace "example.com" with your domain).
