@@ -1,0 +1,202 @@
+---
+- hosts: wordpress
+
+  tasks:
+
+    - name: update_cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Update all packages to their latest version
+      apt:
+        name: "*"
+        state: latest
+
+    - name: ensure nginx is at the latest version
+      apt: name=nginx state=latest
+
+    - name: start nginx
+      service:
+          name: nginx
+          state: started
+          enabled: yes
+
+    - name: install mariadb-server
+      apt: name=mariadb-server state=latest
+
+    - name: install mariadb-client
+      apt: name=mariadb-client state=latest
+
+    - name: start mariadb
+      service:
+          name: mariadb
+          state: started
+          enabled: yes
+
+    - name: python3-pymysql
+      apt: name=python3-pymysql state=latest
+
+    - name: Set root password
+      community.mysql.mysql_user:
+        name: root
+        password: "{{ mysql_root_password }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Copy .my.cnf for easier mysql automation
+      blockinfile:
+        path: ~/.my.cnf
+        create: yes
+        block: |
+          [client]
+          user=root
+          password={{ mysql_root_password }}
+      
+    - name: Removes test database
+      community.mysql.mysql_db:
+        name: test
+        state: absent
+
+    - name: Prohibit Remote Root login
+      no_log: true
+      community.mysql.mysql_query:
+        login_db: mysql
+        query: "{{ item }}"
+      with_items:
+        - DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+        - FLUSH PRIVILEGES;
+
+    - name: Install php and all the things
+      apt:
+        pkg:
+          - php
+          - php-mysql
+          - php-fpm
+          - php-curl 
+          - php-gd
+          - php-intl
+          - php-mbstring
+          - php-soap
+          - php-xml
+          - php-xmlrpc
+          - php-zip
+          - php-imagick
+        state: latest
+        update_cache: true
+
+    - name: start php7.4-fpm
+      service:
+          name: php7.4-fpm
+          state: started
+          enabled: yes
+
+    - name: remove apache page
+      file:
+        path: "/var/www/html/index.html"
+        state: absent
+    
+    - name: Allow connections on 80
+      ansible.builtin.iptables:
+        chain: INPUT
+        action: insert
+        protocol: tcp
+        destination_port: 80
+        jump: ACCEPT
+        rule_num: 6
+
+    - name: Allow connections on 443
+      ansible.builtin.iptables:
+        chain: INPUT
+        action: insert
+        protocol: tcp
+        destination_port: 443
+        jump: ACCEPT
+        rule_num: 6
+
+    - name: Save current state of the firewall in system file
+      community.general.iptables_state:
+        state: saved
+        path: /etc/sysconfig/iptables
+
+    - name: Create a new database 
+      community.mysql.mysql_db:
+        name: wordpress
+        state: present
+
+    - name: Create database user with password and give perms to the db
+      community.mysql.mysql_user:
+        name: wordpressuser
+        password: "{{ wordpressuser_password }}"
+        priv: 'wordpress.*:ALL'
+        state: present
+
+    - name: Create a /var/www/example.com
+      ansible.builtin.file:
+        path: /var/www/example.com
+        state: directory
+        mode: '0755'
+    
+    - name: Copy default nginx page
+      ansible.builtin.copy:
+        src: /var/www/html/index.nginx-debian.html
+        dest: /var/www/example.com/index.nginx-debian.html
+        remote_src: yes
+
+    - name: Copy nginx config
+      ansible.builtin.copy:
+        src: config/example.com
+        dest: /etc/nginx/sites-available/example.com
+        remote_src: no
+
+    - name: remove default site symlink
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Create a symbolic link
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/example.com
+        dest: /etc/nginx/sites-enabled/example.com
+        state: link
+
+    - name: Download and unpack latest WordPress
+      unarchive:
+        src: https://wordpress.org/latest.tar.gz
+        dest: "/tmp"
+        remote_src: yes
+
+    - name: remove default ngninx page
+      file:
+        path: /var/www/example.com/index.nginx-debian.html
+        state: absent
+
+    - name: Copy default wp files
+      ansible.builtin.copy:
+        src: /tmp/wordpress/
+        dest: /var/www/example.com/
+        remote_src: yes
+    
+    - name: Copy wp config file
+      ansible.builtin.copy:
+        src: config/wp-config.php
+        dest: /var/www/example.com/
+        remote_src: no
+
+    - name: Recursively change ownership of a web directory
+      ansible.builtin.file:
+        path: /var/www/example.com
+        state: directory
+        recurse: yes
+        owner: www-data
+        group: www-data
+
+    - name: ensure certbot is at the latest version
+      apt: name=certbot state=latest
+
+    - name: ensure certbot nginx plugin is at the latest version
+      apt: name=python3-certbot-nginx state=latest
+    
+    - name: Restart service httpd, in all cases
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
